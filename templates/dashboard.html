@@ -5,578 +5,421 @@
 
     <meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>CloudStorage Dashboard</title>
-
 
     <style>
 
         * {
-
             box-sizing: border-box;
-
             margin: 0;
-
             padding: 0;
-
             font-family: Arial, sans-serif;
-
         }
-
 
         html {
-
             scroll-behavior: smooth;
-
         }
-
 
         body {
-
             background: #f7f9fc;
-
             color: #172033;
-
+            overflow-x: hidden;
         }
 
 
-        /* ---------------- SIDEBAR ---------------- */
-
+        /* ================= SIDEBAR ================= */
 
         .layout {
-
             display: flex;
-
             min-height: 100vh;
-
         }
-
 
         .sidebar {
-
             width: 230px;
-
             background: white;
-
             border-right: 1px solid #e5e9f0;
-
             padding: 30px 20px;
-
             display: flex;
-
             flex-direction: column;
-
             min-height: 100vh;
-
             position: fixed;
-
             left: 0;
-
             top: 0;
-
             bottom: 0;
-
         }
-
 
         .logo {
-
             font-size: 22px;
-
             font-weight: bold;
-
             margin-bottom: 50px;
-
         }
-
 
         .logo span {
-
             color: #287bea;
-
         }
-
 
         .menu {
-
             display: block;
-
             padding: 13px 15px;
-
             margin-bottom: 10px;
-
             border-radius: 8px;
-
             text-decoration: none;
-
             color: #526079;
-
         }
-
 
         .menu:hover {
-
             background: #f3f6fa;
-
         }
-
 
         .menu.active {
-
             background: #eef5ff;
-
             color: #287bea;
-
         }
-
 
         .logout {
-
             margin-top: auto;
-
         }
 
 
-        /* ---------------- MAIN ---------------- */
+        /* ================= MOBILE HEADER ================= */
 
+        .mobile-header {
+            display: none;
+        }
+
+
+        /* ================= MAIN ================= */
 
         .main {
-
             margin-left: 230px;
-
             flex: 1;
-
             padding: 55px;
-
             max-width: 1200px;
-
+            min-width: 0;
         }
-
 
         .welcome h1 {
-
             font-size: 34px;
-
             margin-bottom: 10px;
-
         }
-
 
         .welcome p {
-
             color: #718096;
-
             font-size: 16px;
-
             margin-bottom: 30px;
-
         }
 
 
-        /* ---------------- STORAGE ---------------- */
-
+        /* ================= STORAGE ================= */
 
         .storage-card {
-
             background: white;
-
             border: 1px solid #e1e7ef;
-
             border-radius: 12px;
-
             padding: 22px 25px;
-
             margin-bottom: 30px;
-
         }
-
 
         .storage-card h3 {
-
             margin-bottom: 6px;
-
         }
-
 
         .storage-card p {
-
             color: #718096;
-
             font-size: 14px;
-
         }
-
 
         .storage-value {
-
             font-size: 24px;
-
             font-weight: bold;
-
             color: #287bea;
-
             margin-top: 10px;
-
         }
 
 
-        /* ---------------- UPLOAD ---------------- */
-
+        /* ================= UPLOAD ================= */
 
         .upload-box {
-
             background: white;
-
             border: 1px solid #e1e7ef;
-
             border-radius: 12px;
-
             padding: 25px;
-
             margin-bottom: 40px;
-
         }
-
 
         .upload-info h3 {
-
             margin-bottom: 8px;
-
             font-size: 18px;
-
         }
-
 
         .upload-info p {
-
             color: #718096;
-
             font-size: 14px;
-
             margin-bottom: 15px;
-
         }
-
 
         .file-input {
-
             margin-right: 10px;
-
+            max-width: 100%;
         }
-
 
         .upload-btn {
-
             background: #287bea;
-
             color: white;
-
             border: none;
-
             padding: 12px 20px;
-
             border-radius: 8px;
-
             cursor: pointer;
-
             font-size: 14px;
-
         }
-
 
         .upload-btn:hover {
-
             background: #1769d3;
-
         }
 
 
-        /* ---------------- SEARCH ---------------- */
-
+        /* ================= SEARCH ================= */
 
         .search-box {
-
             margin-bottom: 20px;
-
         }
-
 
         .search-box input {
-
             width: 100%;
-
             padding: 12px 15px;
-
             border: 1px solid #dce3ed;
-
             border-radius: 8px;
-
             font-size: 14px;
-
             outline: none;
-
         }
-
 
         .search-box input:focus {
-
             border-color: #287bea;
-
         }
 
 
-        /* ---------------- FILES ---------------- */
-
+        /* ================= FILES ================= */
 
         .files-heading {
-
             display: flex;
-
             justify-content: space-between;
-
             align-items: center;
-
             margin-bottom: 20px;
-
             scroll-margin-top: 25px;
-
         }
-
 
         .files-title {
-
             font-size: 25px;
-
         }
-
 
         .file-count {
-
             color: #718096;
-
         }
-
 
         .file-table {
-
             background: white;
-
             border: 1px solid #e1e7ef;
-
             border-radius: 12px;
-
             overflow: hidden;
-
+            width: 100%;
         }
-
 
         .file-header,
-
         .file-row {
-
             display: grid;
-
             grid-template-columns: 2fr 1fr 1.5fr;
-
             align-items: center;
-
             padding: 18px 22px;
-
         }
-
 
         .file-header {
-
             color: #718096;
-
             font-size: 14px;
-
             border-bottom: 1px solid #e5e9f0;
-
         }
-
 
         .file-row {
-
             border-bottom: 1px solid #edf0f4;
-
         }
-
 
         .file-row:last-child {
-
             border-bottom: none;
-
         }
-
 
         .file-name {
-
             color: #172033;
-
             font-weight: 500;
-
             text-decoration: none;
 
+            /* FIX LONG FILENAMES */
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
-
 
         .file-name:hover {
-
             color: #287bea;
-
         }
-
 
         .actions {
-
             display: flex;
-
             gap: 10px;
-
+            flex-wrap: wrap;
         }
-
 
         .download-btn,
-
         .delete-btn {
-
             padding: 8px 14px;
-
             border-radius: 7px;
-
             text-decoration: none;
-
             font-size: 14px;
-
+            white-space: nowrap;
         }
-
 
         .download-btn {
-
             border: 1px solid #dce3ed;
-
             color: #263449;
-
             background: white;
-
         }
-
 
         .delete-btn {
-
             border: 1px solid #ffcaca;
-
             color: #e53935;
-
             background: white;
-
         }
-
 
         .download-btn:hover {
-
             background: #f5f8fc;
-
         }
-
 
         .delete-btn:hover {
-
             background: #fff4f4;
-
         }
-
 
         .empty {
-
             padding: 30px;
-
             color: #718096;
-
             text-align: center;
-
         }
 
 
-        /* ---------------- MOBILE ---------------- */
-
+        /* ================= MOBILE ================= */
 
         @media (max-width: 700px) {
 
-
             .sidebar {
-
                 display: none;
-
             }
 
+            .mobile-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+
+                background: white;
+                border-bottom: 1px solid #e5e9f0;
+
+                padding: 16px 20px;
+
+                position: sticky;
+                top: 0;
+                z-index: 10;
+            }
+
+            .mobile-logo {
+                font-size: 20px;
+                font-weight: bold;
+            }
+
+            .mobile-logo span {
+                color: #287bea;
+            }
+
+            .mobile-logout {
+                text-decoration: none;
+                color: #e53935;
+
+                border: 1px solid #ffcaca;
+
+                padding: 8px 12px;
+
+                border-radius: 7px;
+
+                font-size: 14px;
+            }
 
             .main {
-
                 margin-left: 0;
-
-                padding: 25px;
-
+                padding: 25px 20px;
+                width: 100%;
+                max-width: 100%;
             }
 
+            .welcome h1 {
+                font-size: 34px;
+            }
+
+            .welcome p {
+                line-height: 1.5;
+            }
+
+            .storage-card,
+            .upload-box {
+                width: 100%;
+            }
 
             .file-header {
-
                 display: none;
-
             }
-
 
             .file-row {
-
                 display: block;
-
-                padding: 18px;
-
+                padding: 20px;
             }
 
+            .file-row > div:first-child {
+                width: 100%;
+                margin-bottom: 8px;
+            }
+
+            .file-name {
+                display: block;
+                width: 100%;
+
+                /* EXTRA MOBILE FILE NAME FIX */
+                overflow-wrap: anywhere;
+                word-break: break-word;
+                white-space: normal;
+            }
 
             .actions {
-
-                margin-top: 12px;
-
+                margin-top: 14px;
+                display: flex;
+                gap: 10px;
             }
 
+            .download-btn,
+            .delete-btn {
+                display: inline-block;
+            }
 
             .upload-box {
-
                 padding: 20px;
-
             }
-
 
             .file-input {
-
                 margin-bottom: 15px;
-
                 max-width: 100%;
-
             }
-
 
             .upload-btn {
-
                 margin-top: 5px;
-
             }
 
-
             .files-heading {
-
                 align-items: flex-start;
-
                 gap: 10px;
-
             }
 
         }
@@ -589,51 +432,56 @@
 <body>
 
 
+<!-- MOBILE HEADER -->
+
+<div class="mobile-header">
+
+    <div class="mobile-logo">
+        ☁ <span>Cloud</span>Storage
+    </div>
+
+    <a
+        href="/logout"
+        class="mobile-logout"
+    >
+        Logout
+    </a>
+
+</div>
+
+
+
 <div class="layout">
 
 
     <!-- SIDEBAR -->
 
-
     <aside class="sidebar">
 
-
         <div class="logo">
-
             ☁ <span>Cloud</span>Storage
-
         </div>
-
 
         <a
             href="/"
             class="menu active"
         >
-
             ⌂ &nbsp; Home
-
         </a>
-
 
         <a
             href="#my-files"
             class="menu"
         >
-
             📁 &nbsp; My Files
-
         </a>
-
 
         <a
             href="/logout"
             class="menu logout"
         >
-
             ⎋ &nbsp; Logout
-
         </a>
-
 
     </aside>
 
@@ -641,29 +489,20 @@
 
     <!-- MAIN -->
 
-
     <main class="main">
 
 
         <!-- WELCOME -->
 
-
         <div class="welcome">
 
-
             <h1>
-
                 Welcome!
-
             </h1>
 
-
             <p>
-
                 Upload, manage and access your files securely in the cloud.
-
             </p>
-
 
         </div>
 
@@ -671,32 +510,21 @@
 
         <!-- STORAGE -->
 
-
         <div class="storage-card">
 
-
             <h3>
-
                 Storage Usage
-
             </h3>
 
-
             <p>
-
                 {{ files|length }}
                 file{% if files|length != 1 %}s{% endif %}
                 stored in your cloud
-
             </p>
 
-
             <div class="storage-value">
-
                 {{ (total_size / 1024 / 1024) | round(2) }} MB
-
             </div>
-
 
         </div>
 
@@ -704,33 +532,23 @@
 
         <!-- UPLOAD -->
 
-
         <div class="upload-box">
-
 
             <div class="upload-info">
 
-
                 <h3>
-
                     Choose a file to upload
-
                 </h3>
 
-
                 <p>
-
                     Select a file from your device and upload it to your cloud storage.
-
                 </p>
-
 
                 <form
                     action="/upload"
                     method="POST"
                     enctype="multipart/form-data"
                 >
-
 
                     <input
                         class="file-input"
@@ -739,22 +557,16 @@
                         required
                     >
 
-
                     <button
                         class="upload-btn"
                         type="submit"
                     >
-
                         Upload File
-
                     </button>
-
 
                 </form>
 
-
             </div>
-
 
         </div>
 
@@ -762,9 +574,7 @@
 
         <!-- SEARCH -->
 
-
         <div class="search-box">
-
 
             <input
                 type="text"
@@ -773,37 +583,28 @@
                 onkeyup="searchFiles()"
             >
 
-
         </div>
 
 
 
         <!-- FILE HEADING -->
 
-
         <div
             class="files-heading"
             id="my-files"
         >
 
-
             <h2 class="files-title">
-
                 My Files
-
             </h2>
 
-
             <span class="file-count">
-
 
                 {{ files|length }}
 
                 file{% if files|length != 1 %}s{% endif %}
 
-
             </span>
-
 
         </div>
 
@@ -811,49 +612,32 @@
 
         <!-- FILE TABLE -->
 
-
         <div class="file-table">
-
 
             <div class="file-header">
 
-
                 <div>
-
                     Name
-
                 </div>
 
-
                 <div>
-
                     Type
-
                 </div>
-
 
                 <div>
-
                     Actions
-
                 </div>
-
 
             </div>
 
 
-
             {% if files %}
-
 
                 {% for file in files %}
 
-
                     <div class="file-row">
 
-
                         <div>
-
 
                             <a
                                 class="file-name"
@@ -864,87 +648,61 @@
 
                             </a>
 
-
                         </div>
 
 
-
                         <div>
-
 
                             {{ file.Key.split('.')[-1].upper()
                                if '.' in file.Key
                                else 'FILE' }}
 
-
                         </div>
 
 
-
                         <div class="actions">
-
 
                             <a
                                 class="download-btn"
                                 href="{{ url_for('download_file', filename=file.Key) }}"
                             >
-
                                 Download
-
                             </a>
-
 
                             <a
                                 class="delete-btn"
                                 href="{{ url_for('delete_file', filename=file.Key) }}"
                                 onclick="return confirm('Are you sure you want to delete this file?');"
                             >
-
                                 Delete
-
                             </a>
-
 
                         </div>
 
-
                     </div>
-
 
                 {% endfor %}
 
-
             {% else %}
 
-
                 <div class="empty">
-
                     No files found.
-
                 </div>
 
-
             {% endif %}
-
 
         </div>
 
 
     </main>
 
-
 </div>
 
 
 
-<!-- SEARCH JAVASCRIPT -->
-
-
 <script>
 
-
 function searchFiles() {
-
 
     const searchText =
         document
@@ -952,13 +710,10 @@ function searchFiles() {
             .value
             .toLowerCase();
 
-
     const rows =
         document.querySelectorAll(".file-row");
 
-
     rows.forEach(function(row) {
-
 
         const fileName =
             row
@@ -966,25 +721,17 @@ function searchFiles() {
                 .textContent
                 .toLowerCase();
 
-
         if (fileName.includes(searchText)) {
-
             row.style.display = "";
-
         }
 
         else {
-
             row.style.display = "none";
-
         }
-
 
     });
 
-
 }
-
 
 </script>
 
