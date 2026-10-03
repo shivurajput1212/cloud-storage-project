@@ -1,20 +1,47 @@
-from flask import Flask, render_template, send_file, request, redirect, url_for, session
+from flask import (
+    Flask,
+    render_template,
+    send_file,
+    request,
+    redirect,
+    url_for,
+    session
+)
+
 import boto3
 import os
 import io
-from dotenv import load_dotenv
+import sqlite3
+import random
+import smtplib
 
-# Load environment variables
+from email.message import EmailMessage
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+
+
+# =========================================================
+# LOAD ENVIRONMENT VARIABLES
+# =========================================================
+
 load_dotenv()
+
+
+# =========================================================
+# FLASK CONFIGURATION
+# =========================================================
 
 app = Flask(__name__)
 
-# Secret key for login sessions
-app.secret_key = "cloud-storage-secret-key"
+app.secret_key = os.getenv(
+    "FLASK_SECRET_KEY",
+    "change-this-secret-key"
+)
 
-# --------------------------------------------------
+
+# =========================================================
 # AWS CONFIGURATION
-# --------------------------------------------------
+# =========================================================
 
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -22,12 +49,6 @@ AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("AWS_BUCKET_NAME")
 
 
-# Check AWS configuration
-if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY or not AWS_REGION or not S3_BUCKET:
-    print("WARNING: AWS configuration is missing in .env")
-
-
-# Connect to Amazon S3
 s3 = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -36,57 +57,503 @@ s3 = boto3.client(
 )
 
 
-# --------------------------------------------------
-# LOGIN
-# --------------------------------------------------
+# =========================================================
+# EMAIL CONFIGURATION
+# =========================================================
+
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_EMAIL = os.getenv("SMTP_EMAIL")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+
+
+# =========================================================
+# DATABASE
+# =========================================================
+
+DATABASE = "users.db"
+
+
+def get_db():
+    connection = sqlite3.connect(DATABASE)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def create_database():
+
+    connection = get_db()
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            verified INTEGER DEFAULT 0
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
+
+create_database()
+
+
+# =========================================================
+# OTP FUNCTIONS
+# =========================================================
+
+def generate_otp():
+
+    return str(random.randint(100000, 999999))
+
+
+def send_otp_email(receiver_email, otp):
+
+    if not SMTP_EMAIL or not SMTP_PASSWORD:
+        print("WARNING: SMTP_EMAIL or SMTP_PASSWORD is missing.")
+        print("OTP for", receiver_email, "is:", otp)
+        return False
+
+    message = EmailMessage()
+
+    message["Subject"] = "CloudStorage Verification Code"
+    message["From"] = SMTP_EMAIL
+    message["To"] = receiver_email
+
+    message.set_content(
+        f"""
+Hello,
+
+Your CloudStorage verification code is:
+
+{otp}
+
+This code is valid for this verification process.
+
+If you did not request this code, you can ignore this email.
+
+CloudStorage
+"""
+    )
+
+    try:
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+
+            server.starttls()
+
+            server.login(
+                SMTP_EMAIL,
+                SMTP_PASSWORD
+            )
+
+            server.send_message(message)
+
+        return True
+
+    except Exception as e:
+
+        print("Email error:", e)
+
+        return False
+
+
+# =========================================================
+# LOGIN PAGE
+# =========================================================
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
 
-    # If already logged in, go to dashboard
-    if "user" in session:
+    if "user_id" in session:
+
         return redirect(url_for("home"))
 
     if request.method == "POST":
 
-        username = request.form.get("username")
-        password = request.form.get("password")
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
 
-        # Demo login credentials
-        if username == "admin" and password == "1234":
+        connection = get_db()
 
-            session["user"] = username
+        user = connection.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email,)
+        ).fetchone()
 
-            return redirect(url_for("home"))
+        connection.close()
 
-        return render_template(
-            "login.html",
-            error="Invalid username or password"
+        if not user:
+
+            return render_template(
+                "login.html",
+                error="Invalid email or password."
+            )
+
+        if not check_password_hash(
+            user["password"],
+            password
+        ):
+
+            return render_template(
+                "login.html",
+                error="Invalid email or password."
+            )
+
+        # -------------------------------------------------
+        # EMAIL VERIFICATION CHECK
+        # -------------------------------------------------
+
+        if user["verified"] == 0:
+
+            otp = generate_otp()
+
+            session["verification_user_id"] = user["id"]
+            session["verification_email"] = user["email"]
+            session["verification_otp"] = otp
+
+            send_otp_email(
+                user["email"],
+                otp
+            )
+
+            return redirect(
+                url_for("verify_login")
+            )
+
+        # -------------------------------------------------
+        # SEND OTP FOR LOGIN
+        # -------------------------------------------------
+
+        otp = generate_otp()
+
+        session["login_user_id"] = user["id"]
+        session["login_email"] = user["email"]
+        session["login_otp"] = otp
+
+        send_otp_email(
+            user["email"],
+            otp
+        )
+
+        return redirect(
+            url_for("verify_login")
         )
 
     return render_template("login.html")
 
 
-# --------------------------------------------------
+# =========================================================
+# SIGN UP
+# =========================================================
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+
+    if "user_id" in session:
+
+        return redirect(url_for("home"))
+
+    if request.method == "POST":
+
+        username = request.form.get(
+            "username",
+            ""
+        ).strip()
+
+        email = request.form.get(
+            "email",
+            ""
+        ).strip().lower()
+
+        password = request.form.get(
+            "password",
+            ""
+        )
+
+        confirm_password = request.form.get(
+            "confirm_password",
+            ""
+        )
+
+        # -------------------------------------------------
+        # BASIC VALIDATION
+        # -------------------------------------------------
+
+        if not username or not email or not password:
+
+            return render_template(
+                "signup.html",
+                error="Please fill all fields."
+            )
+
+        if password != confirm_password:
+
+            return render_template(
+                "signup.html",
+                error="Passwords do not match."
+            )
+
+        if len(password) < 6:
+
+            return render_template(
+                "signup.html",
+                error="Password must contain at least 6 characters."
+            )
+
+        connection = get_db()
+
+        existing_user = connection.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email,)
+        ).fetchone()
+
+        if existing_user:
+
+            connection.close()
+
+            return render_template(
+                "signup.html",
+                error="An account with this email already exists."
+            )
+
+        # -------------------------------------------------
+        # CREATE USER
+        # -------------------------------------------------
+
+        hashed_password = generate_password_hash(
+            password
+        )
+
+        cursor = connection.execute(
+            """
+            INSERT INTO users
+            (username, email, password, verified)
+            VALUES (?, ?, ?, 0)
+            """,
+            (
+                username,
+                email,
+                hashed_password
+            )
+        )
+
+        connection.commit()
+
+        user_id = cursor.lastrowid
+
+        connection.close()
+
+        # -------------------------------------------------
+        # CREATE OTP
+        # -------------------------------------------------
+
+        otp = generate_otp()
+
+        session["verification_user_id"] = user_id
+        session["verification_email"] = email
+        session["verification_otp"] = otp
+
+        send_otp_email(
+            email,
+            otp
+        )
+
+        return redirect(
+            url_for("verify_signup")
+        )
+
+    return render_template("signup.html")
+
+
+# =========================================================
+# SIGNUP OTP VERIFICATION
+# =========================================================
+
+@app.route("/verify-signup", methods=["GET", "POST"])
+def verify_signup():
+
+    if "verification_user_id" not in session:
+
+        return redirect(url_for("signup"))
+
+    if request.method == "POST":
+
+        entered_otp = request.form.get(
+            "otp",
+            ""
+        ).strip()
+
+        saved_otp = session.get(
+            "verification_otp"
+        )
+
+        if entered_otp != saved_otp:
+
+            return render_template(
+                "verify.html",
+                error="Invalid verification code."
+            )
+
+        user_id = session["verification_user_id"]
+
+        connection = get_db()
+
+        connection.execute(
+            """
+            UPDATE users
+            SET verified = 1
+            WHERE id = ?
+            """,
+            (user_id,)
+        )
+
+        connection.commit()
+        connection.close()
+
+        session.pop(
+            "verification_user_id",
+            None
+        )
+
+        session.pop(
+            "verification_email",
+            None
+        )
+
+        session.pop(
+            "verification_otp",
+            None
+        )
+
+        return redirect(
+            url_for("login")
+        )
+
+    return render_template(
+        "verify.html"
+    )
+
+
+# =========================================================
+# LOGIN OTP VERIFICATION
+# =========================================================
+
+@app.route("/verify-login", methods=["GET", "POST"])
+def verify_login():
+
+    if "login_user_id" not in session:
+
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+
+        entered_otp = request.form.get(
+            "otp",
+            ""
+        ).strip()
+
+        saved_otp = session.get(
+            "login_otp"
+        )
+
+        if entered_otp != saved_otp:
+
+            return render_template(
+                "verify.html",
+                error="Invalid verification code."
+            )
+
+        user_id = session["login_user_id"]
+
+        session["user_id"] = user_id
+
+        session.pop(
+            "login_user_id",
+            None
+        )
+
+        session.pop(
+            "login_email",
+            None
+        )
+
+        session.pop(
+            "login_otp",
+            None
+        )
+
+        return redirect(
+            url_for("home")
+        )
+
+    return render_template(
+        "verify.html"
+    )
+
+
+# =========================================================
 # DASHBOARD
-# --------------------------------------------------
+# =========================================================
 
 @app.route("/")
 def home():
 
-    # Protect dashboard
-    if "user" not in session:
-        return redirect(url_for("login"))
+    if "user_id" not in session:
+
+        return redirect(
+            url_for("login")
+        )
+
+    user_id = session["user_id"]
+
+    connection = get_db()
+
+    user = connection.execute(
+        "SELECT * FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+
+    connection.close()
+
+    if not user:
+
+        session.clear()
+
+        return redirect(
+            url_for("login")
+        )
+
+    # -----------------------------------------------------
+    # USER-SPECIFIC S3 FOLDER
+    # -----------------------------------------------------
+
+    prefix = f"users/{user_id}/"
 
     try:
 
         response = s3.list_objects_v2(
-            Bucket=S3_BUCKET
+            Bucket=S3_BUCKET,
+            Prefix=prefix
         )
 
-        files = response.get("Contents", [])
+        files = response.get(
+            "Contents",
+            []
+        )
 
-        # Calculate total storage used
+        # Remove folder path from displayed filename
+        for file in files:
+
+            file["DisplayName"] = file["Key"].replace(
+                prefix,
+                "",
+                1
+            )
+
         total_size = sum(
             file.get("Size", 0)
             for file in files
@@ -95,38 +562,53 @@ def home():
         return render_template(
             "dashboard.html",
             files=files,
-            total_size=total_size
+            total_size=total_size,
+            username=user["username"],
+            email=user["email"]
         )
 
     except Exception as e:
 
         return f"""
         <h2>Unable to connect to AWS S3</h2>
-        <p>Please check your AWS configuration and .env file.</p>
+        <p>Please check your AWS configuration.</p>
         <p>Error: {e}</p>
         """
 
 
-# --------------------------------------------------
+# =========================================================
 # UPLOAD
-# --------------------------------------------------
+# =========================================================
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
 
-    if "user" not in session:
-        return redirect(url_for("login"))
+    if "user_id" not in session:
 
-    file = request.files.get("file")
+        return redirect(
+            url_for("login")
+        )
+
+    file = request.files.get(
+        "file"
+    )
 
     if file and file.filename:
+
+        user_id = session["user_id"]
+
+        filename = os.path.basename(
+            file.filename
+        )
+
+        s3_key = f"users/{user_id}/{filename}"
 
         try:
 
             s3.upload_fileobj(
                 file,
                 S3_BUCKET,
-                file.filename
+                s3_key
             )
 
         except Exception as e:
@@ -136,24 +618,37 @@ def upload_file():
             <p>{e}</p>
             """
 
-    return redirect(url_for("home"))
+    return redirect(
+        url_for("home")
+    )
 
 
-# --------------------------------------------------
+# =========================================================
 # DOWNLOAD
-# --------------------------------------------------
+# =========================================================
 
 @app.route("/download/<path:filename>")
 def download_file(filename):
 
-    if "user" not in session:
-        return redirect(url_for("login"))
+    if "user_id" not in session:
+
+        return redirect(
+            url_for("login")
+        )
+
+    user_id = session["user_id"]
+
+    filename = os.path.basename(
+        filename
+    )
+
+    s3_key = f"users/{user_id}/{filename}"
 
     try:
 
         file_object = s3.get_object(
             Bucket=S3_BUCKET,
-            Key=filename
+            Key=s3_key
         )
 
         return send_file(
@@ -172,21 +667,32 @@ def download_file(filename):
         """
 
 
-# --------------------------------------------------
+# =========================================================
 # DELETE
-# --------------------------------------------------
+# =========================================================
 
 @app.route("/delete/<path:filename>")
 def delete_file(filename):
 
-    if "user" not in session:
-        return redirect(url_for("login"))
+    if "user_id" not in session:
+
+        return redirect(
+            url_for("login")
+        )
+
+    user_id = session["user_id"]
+
+    filename = os.path.basename(
+        filename
+    )
+
+    s3_key = f"users/{user_id}/{filename}"
 
     try:
 
         s3.delete_object(
             Bucket=S3_BUCKET,
-            Key=filename
+            Key=s3_key
         )
 
     except Exception as e:
@@ -196,24 +702,31 @@ def delete_file(filename):
         <p>{e}</p>
         """
 
-    return redirect(url_for("home"))
+    return redirect(
+        url_for("home")
+    )
 
 
-# --------------------------------------------------
+# =========================================================
 # LOGOUT
-# --------------------------------------------------
+# =========================================================
 
 @app.route("/logout")
 def logout():
 
     session.clear()
 
-    return redirect(url_for("login"))
+    return redirect(
+        url_for("login")
+    )
 
 
-# --------------------------------------------------
+# =========================================================
 # START APPLICATION
-# --------------------------------------------------
+# =========================================================
 
 if __name__ == "__main__":
-    app.run(debug=True)
+
+    app.run(
+        debug=True
+    )
