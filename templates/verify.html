@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Verify Email - CloudStorage</title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f7f9fc;
+        }
+
+        .verify-box {
+            width: 380px;
+            background: white;
+            padding: 40px;
+            border: 1px solid #e1e7ef;
+            border-radius: 14px;
+            text-align: center;
+        }
+
+        .icon {
+            font-size: 45px;
+            margin-bottom: 15px;
+        }
+
+        h2 {
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #718096;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 25px;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid #dce3ed;
+            border-radius: 7px;
+            outline: none;
+            font-size: 20px;
+            text-align: center;
+            letter-spacing: 6px;
+            margin-bottom: 18px;
+        }
+
+        input:focus {
+            border-color: #287bea;
+        }
+
+        button {
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 7px;
+            background: #287bea;
+            color: white;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1769d3;
+        }
+
+        .error {
+            background: #fff1f1;
+            border: 1px solid #ffcaca;
+            color: #d93025;
+            padding: 10px;
+            border-radius: 7px;
+            margin-bottom: 18px;
+            font-size: 14px;
+        }
+
+        .back {
+            display: block;
+            margin-top: 20px;
+            color: #287bea;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        @media (max-width: 500px) {
+
+            .verify-box {
+                width: calc(100% - 30px);
+                padding: 30px;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+    <div class="verify-box">
+
+        <div class="icon">
+            ✉️
+        </div>
+
+        <h2>
+            Verify Your Email
+        </h2>
+
+        <p class="subtitle">
+            We sent a 6-digit verification code
+            to your email address.
+            Enter the code below to continue.
+        </p>
+
+
+        {% if error %}
+
+            <div class="error">
+                {{ error }}
+            </div>
+
+        {% endif %}
+
+
+        <form
+            method="POST"
+        >
+
+            <input
+                type="text"
+                name="otp"
+                placeholder="000000"
+                maxlength="6"
+                pattern="[0-9]{6}"
+                inputmode="numeric"
+                required
+            >
+
+            <button type="submit">
+                Verify
+            </button>
+
+        </form>
+
+
+        <a
+            href="/login"
+            class="back"
+        >
+            Back to Sign In
+        </a>
+
+    </div>
+
+</body>
+
+</html>
