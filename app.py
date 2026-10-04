@@ -11,11 +11,7 @@ from flask import (
 import boto3
 import os
 import io
-import random
 import psycopg2
-import json
-import urllib.request
-import urllib.error
 
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
@@ -50,21 +46,13 @@ AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("AWS_BUCKET_NAME")
 
+
 s3 = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
     aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
     region_name=AWS_REGION
 )
-
-
-# =========================================================
-# EMAIL CONFIGURATION - RESEND API
-# =========================================================
-
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-
-RESEND_FROM_EMAIL = "onboarding@resend.dev"
 
 
 # =========================================================
@@ -93,7 +81,7 @@ def create_database():
             username TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
-            verified INTEGER DEFAULT 0
+            verified INTEGER DEFAULT 1
         )
     """)
 
@@ -107,141 +95,7 @@ create_database()
 
 
 # =========================================================
-# OTP FUNCTIONS
-# =========================================================
-
-def generate_otp():
-
-    return str(random.randint(100000, 999999))
-
-
-def send_otp_email(receiver_email, otp):
-
-    if not RESEND_API_KEY:
-
-        print("ERROR: RESEND_API_KEY is missing.")
-
-        print(
-            "OTP for",
-            receiver_email,
-            "is:",
-            otp
-        )
-
-        return False
-
-
-    # -----------------------------------------------------
-    # EMAIL DATA
-    # -----------------------------------------------------
-
-    data = {
-
-        "from": RESEND_FROM_EMAIL,
-
-        "to": [
-            receiver_email
-        ],
-
-        "subject": "CloudStorage Verification Code",
-
-        "text": f"""
-Hello,
-
-Your CloudStorage verification code is:
-
-{otp}
-
-Please enter this code on the CloudStorage website
-to complete verification.
-
-This code is valid for this verification process.
-
-If you did not request this code, you can ignore this email.
-
-CloudStorage
-"""
-    }
-
-
-    # -----------------------------------------------------
-    # RESEND API REQUEST
-    # -----------------------------------------------------
-
-    api_request = urllib.request.Request(
-
-        "https://api.resend.com/emails",
-
-        data=json.dumps(
-            data
-        ).encode("utf-8"),
-
-        headers={
-
-            "Authorization":
-                f"Bearer {RESEND_API_KEY}",
-
-            "Content-Type":
-                "application/json"
-        },
-
-        method="POST"
-    )
-
-
-    # -----------------------------------------------------
-    # SEND EMAIL
-    # -----------------------------------------------------
-
-    try:
-
-        with urllib.request.urlopen(
-            api_request,
-            timeout=15
-        ) as response:
-
-            result = response.read().decode(
-                "utf-8"
-            )
-
-            print(
-                "OTP email sent successfully."
-            )
-
-            print(
-                "Resend response:",
-                result
-            )
-
-        return True
-
-
-    except urllib.error.HTTPError as e:
-
-        error_message = e.read().decode(
-            "utf-8"
-        )
-
-        print(
-            "Resend API error:",
-            error_message
-        )
-
-        return False
-
-
-    except Exception as e:
-
-        print(
-            "Email sending error:",
-            str(e)
-        )
-
-        return False
-
-
-# =========================================================
-# LOGIN PAGE
+# LOGIN
 # =========================================================
 
 @app.route(
@@ -311,74 +165,18 @@ def login():
 
 
         # -------------------------------------------------
-        # EMAIL VERIFICATION CHECK
+        # LOGIN SUCCESS
         # -------------------------------------------------
 
-        if user["verified"] == 0:
+        session["user_id"] = user["id"]
 
-            otp = generate_otp()
+        session["username"] = user["username"]
 
-
-            session[
-                "verification_user_id"
-            ] = user["id"]
-
-
-            session[
-                "verification_email"
-            ] = user["email"]
-
-
-            session[
-                "verification_otp"
-            ] = otp
-
-
-            send_otp_email(
-                user["email"],
-                otp
-            )
-
-
-            return redirect(
-                url_for(
-                    "verify_signup"
-                )
-            )
-
-
-        # -------------------------------------------------
-        # SEND OTP FOR LOGIN
-        # -------------------------------------------------
-
-        otp = generate_otp()
-
-
-        session[
-            "login_user_id"
-        ] = user["id"]
-
-
-        session[
-            "login_email"
-        ] = user["email"]
-
-
-        session[
-            "login_otp"
-        ] = otp
-
-
-        send_otp_email(
-            user["email"],
-            otp
-        )
+        session["email"] = user["email"]
 
 
         return redirect(
-            url_for(
-                "verify_login"
-            )
+            url_for("home")
         )
 
 
@@ -509,7 +307,7 @@ def signup():
                 password,
                 verified
             )
-            VALUES (%s, %s, %s, 0)
+            VALUES (%s, %s, %s, 1)
             RETURNING id
             """,
             (
@@ -531,207 +329,14 @@ def signup():
 
 
         # -------------------------------------------------
-        # CREATE OTP
+        # LOGIN NEW USER
         # -------------------------------------------------
 
-        otp = generate_otp()
+        session["user_id"] = user_id
 
+        session["username"] = username
 
-        session[
-            "verification_user_id"
-        ] = user_id
-
-
-        session[
-            "verification_email"
-        ] = email
-
-
-        session[
-            "verification_otp"
-        ] = otp
-
-
-        send_otp_email(
-            email,
-            otp
-        )
-
-
-        return redirect(
-            url_for(
-                "verify_signup"
-            )
-        )
-
-
-    return render_template(
-        "signup.html"
-    )
-
-
-# =========================================================
-# SIGNUP OTP VERIFICATION
-# =========================================================
-
-@app.route(
-    "/verify-signup",
-    methods=["GET", "POST"]
-)
-def verify_signup():
-
-    if (
-        "verification_user_id"
-        not in session
-    ):
-
-        return redirect(
-            url_for("signup")
-        )
-
-
-    if request.method == "POST":
-
-        entered_otp = request.form.get(
-            "otp",
-            ""
-        ).strip()
-
-
-        saved_otp = session.get(
-            "verification_otp"
-        )
-
-
-        if entered_otp != saved_otp:
-
-            return render_template(
-                "verify.html",
-                error="Invalid verification code."
-            )
-
-
-        user_id = session[
-            "verification_user_id"
-        ]
-
-
-        connection = get_db()
-        cursor = connection.cursor()
-
-
-        cursor.execute(
-            """
-            UPDATE users
-            SET verified = 1
-            WHERE id = %s
-            """,
-            (user_id,)
-        )
-
-
-        connection.commit()
-
-
-        cursor.close()
-        connection.close()
-
-
-        session.pop(
-            "verification_user_id",
-            None
-        )
-
-
-        session.pop(
-            "verification_email",
-            None
-        )
-
-
-        session.pop(
-            "verification_otp",
-            None
-        )
-
-
-        return redirect(
-            url_for("login")
-        )
-
-
-    return render_template(
-        "verify.html"
-    )
-
-
-# =========================================================
-# LOGIN OTP VERIFICATION
-# =========================================================
-
-@app.route(
-    "/verify-login",
-    methods=["GET", "POST"]
-)
-def verify_login():
-
-    if (
-        "login_user_id"
-        not in session
-    ):
-
-        return redirect(
-            url_for("login")
-        )
-
-
-    if request.method == "POST":
-
-        entered_otp = request.form.get(
-            "otp",
-            ""
-        ).strip()
-
-
-        saved_otp = session.get(
-            "login_otp"
-        )
-
-
-        if entered_otp != saved_otp:
-
-            return render_template(
-                "verify.html",
-                error="Invalid verification code."
-            )
-
-
-        user_id = session[
-            "login_user_id"
-        ]
-
-
-        session[
-            "user_id"
-        ] = user_id
-
-
-        session.pop(
-            "login_user_id",
-            None
-        )
-
-
-        session.pop(
-            "login_email",
-            None
-        )
-
-
-        session.pop(
-            "login_otp",
-            None
-        )
+        session["email"] = email
 
 
         return redirect(
@@ -740,7 +345,7 @@ def verify_login():
 
 
     return render_template(
-        "verify.html"
+        "signup.html"
     )
 
 
@@ -758,9 +363,7 @@ def home():
         )
 
 
-    user_id = session[
-        "user_id"
-    ]
+    user_id = session["user_id"]
 
 
     connection = get_db()
@@ -787,7 +390,6 @@ def home():
     if not user:
 
         session.clear()
-
 
         return redirect(
             url_for("login")
@@ -816,7 +418,7 @@ def home():
 
 
         # -------------------------------------------------
-        # REMOVE FOLDER PATH FROM DISPLAYED FILE NAME
+        # DISPLAY FILE NAME
         # -------------------------------------------------
 
         for file in files:
@@ -881,9 +483,7 @@ def upload_file():
 
     if file and file.filename:
 
-        user_id = session[
-            "user_id"
-        ]
+        user_id = session["user_id"]
 
 
         filename = os.path.basename(
@@ -934,9 +534,7 @@ def download_file(filename):
         )
 
 
-    user_id = session[
-        "user_id"
-    ]
+    user_id = session["user_id"]
 
 
     filename = os.path.basename(
@@ -995,9 +593,7 @@ def delete_file(filename):
         )
 
 
-    user_id = session[
-        "user_id"
-    ]
+    user_id = session["user_id"]
 
 
     filename = os.path.basename(
@@ -1039,7 +635,6 @@ def delete_file(filename):
 def logout():
 
     session.clear()
-
 
     return redirect(
         url_for("login")
