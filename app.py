@@ -342,7 +342,7 @@ def login():
 
             return redirect(
                 url_for(
-                    "verify_login"
+                    "verify_signup"
                 )
             )
 
