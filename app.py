@@ -148,7 +148,8 @@ CloudStorage
 
         with smtplib.SMTP(
             SMTP_HOST,
-            SMTP_PORT
+            SMTP_PORT,
+            timeout=10
         ) as server:
 
             server.starttls()
