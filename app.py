@@ -12,11 +12,12 @@ import boto3
 import os
 import io
 import random
-import smtplib
 import psycopg2
+import json
+import urllib.request
+import urllib.error
 
 from psycopg2.extras import RealDictCursor
-from email.message import EmailMessage
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -58,13 +59,12 @@ s3 = boto3.client(
 
 
 # =========================================================
-# EMAIL CONFIGURATION
+# EMAIL CONFIGURATION - RESEND API
 # =========================================================
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_EMAIL = os.getenv("SMTP_EMAIL")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+
+RESEND_FROM_EMAIL = "onboarding@resend.dev"
 
 
 # =========================================================
@@ -75,6 +75,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def get_db():
+
     return psycopg2.connect(
         DATABASE_URL,
         cursor_factory=RealDictCursor
@@ -97,6 +98,7 @@ def create_database():
     """)
 
     connection.commit()
+
     cursor.close()
     connection.close()
 
@@ -115,26 +117,43 @@ def generate_otp():
 
 def send_otp_email(receiver_email, otp):
 
-    if not SMTP_EMAIL or not SMTP_PASSWORD:
+    if not RESEND_API_KEY:
 
-        print("WARNING: SMTP_EMAIL or SMTP_PASSWORD is missing.")
-        print("OTP for", receiver_email, "is:", otp)
+        print("ERROR: RESEND_API_KEY is missing.")
+
+        print(
+            "OTP for",
+            receiver_email,
+            "is:",
+            otp
+        )
 
         return False
 
-    message = EmailMessage()
 
-    message["Subject"] = "CloudStorage Verification Code"
-    message["From"] = SMTP_EMAIL
-    message["To"] = receiver_email
+    # -----------------------------------------------------
+    # EMAIL DATA
+    # -----------------------------------------------------
 
-    message.set_content(
-        f"""
+    data = {
+
+        "from": RESEND_FROM_EMAIL,
+
+        "to": [
+            receiver_email
+        ],
+
+        "subject": "CloudStorage Verification Code",
+
+        "text": f"""
 Hello,
 
 Your CloudStorage verification code is:
 
 {otp}
+
+Please enter this code on the CloudStorage website
+to complete verification.
 
 This code is valid for this verification process.
 
@@ -142,30 +161,81 @@ If you did not request this code, you can ignore this email.
 
 CloudStorage
 """
+    }
+
+
+    # -----------------------------------------------------
+    # RESEND API REQUEST
+    # -----------------------------------------------------
+
+    api_request = urllib.request.Request(
+
+        "https://api.resend.com/emails",
+
+        data=json.dumps(
+            data
+        ).encode("utf-8"),
+
+        headers={
+
+            "Authorization":
+                f"Bearer {RESEND_API_KEY}",
+
+            "Content-Type":
+                "application/json"
+        },
+
+        method="POST"
     )
+
+
+    # -----------------------------------------------------
+    # SEND EMAIL
+    # -----------------------------------------------------
 
     try:
 
-        with smtplib.SMTP(
-            SMTP_HOST,
-            SMTP_PORT,
-            timeout=10
-        ) as server:
+        with urllib.request.urlopen(
+            api_request,
+            timeout=15
+        ) as response:
 
-            server.starttls()
-
-            server.login(
-                SMTP_EMAIL,
-                SMTP_PASSWORD
+            result = response.read().decode(
+                "utf-8"
             )
 
-            server.send_message(message)
+            print(
+                "OTP email sent successfully."
+            )
+
+            print(
+                "Resend response:",
+                result
+            )
 
         return True
 
+
+    except urllib.error.HTTPError as e:
+
+        error_message = e.read().decode(
+            "utf-8"
+        )
+
+        print(
+            "Resend API error:",
+            error_message
+        )
+
+        return False
+
+
     except Exception as e:
 
-        print("Email error:", e)
+        print(
+            "Email sending error:",
+            str(e)
+        )
 
         return False
 
@@ -174,12 +244,18 @@ CloudStorage
 # LOGIN PAGE
 # =========================================================
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route(
+    "/login",
+    methods=["GET", "POST"]
+)
 def login():
 
     if "user_id" in session:
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
+
 
     if request.method == "POST":
 
@@ -193,18 +269,27 @@ def login():
             ""
         )
 
+
         connection = get_db()
         cursor = connection.cursor()
 
+
         cursor.execute(
-            "SELECT * FROM users WHERE email = %s",
+            """
+            SELECT *
+            FROM users
+            WHERE email = %s
+            """,
             (email,)
         )
 
+
         user = cursor.fetchone()
+
 
         cursor.close()
         connection.close()
+
 
         if not user:
 
@@ -212,6 +297,7 @@ def login():
                 "login.html",
                 error="Invalid email or password."
             )
+
 
         if not check_password_hash(
             user["password"],
@@ -223,6 +309,7 @@ def login():
                 error="Invalid email or password."
             )
 
+
         # -------------------------------------------------
         # EMAIL VERIFICATION CHECK
         # -------------------------------------------------
@@ -231,18 +318,34 @@ def login():
 
             otp = generate_otp()
 
-            session["verification_user_id"] = user["id"]
-            session["verification_email"] = user["email"]
-            session["verification_otp"] = otp
+
+            session[
+                "verification_user_id"
+            ] = user["id"]
+
+
+            session[
+                "verification_email"
+            ] = user["email"]
+
+
+            session[
+                "verification_otp"
+            ] = otp
+
 
             send_otp_email(
                 user["email"],
                 otp
             )
 
+
             return redirect(
-                url_for("verify_login")
+                url_for(
+                    "verify_login"
+                )
             )
+
 
         # -------------------------------------------------
         # SEND OTP FOR LOGIN
@@ -250,32 +353,56 @@ def login():
 
         otp = generate_otp()
 
-        session["login_user_id"] = user["id"]
-        session["login_email"] = user["email"]
-        session["login_otp"] = otp
+
+        session[
+            "login_user_id"
+        ] = user["id"]
+
+
+        session[
+            "login_email"
+        ] = user["email"]
+
+
+        session[
+            "login_otp"
+        ] = otp
+
 
         send_otp_email(
             user["email"],
             otp
         )
 
+
         return redirect(
-            url_for("verify_login")
+            url_for(
+                "verify_login"
+            )
         )
 
-    return render_template("login.html")
+
+    return render_template(
+        "login.html"
+    )
 
 
 # =========================================================
 # SIGN UP
 # =========================================================
 
-@app.route("/signup", methods=["GET", "POST"])
+@app.route(
+    "/signup",
+    methods=["GET", "POST"]
+)
 def signup():
 
     if "user_id" in session:
 
-        return redirect(url_for("home"))
+        return redirect(
+            url_for("home")
+        )
+
 
     if request.method == "POST":
 
@@ -284,31 +411,40 @@ def signup():
             ""
         ).strip()
 
+
         email = request.form.get(
             "email",
             ""
         ).strip().lower()
+
 
         password = request.form.get(
             "password",
             ""
         )
 
+
         confirm_password = request.form.get(
             "confirm_password",
             ""
         )
 
+
         # -------------------------------------------------
         # BASIC VALIDATION
         # -------------------------------------------------
 
-        if not username or not email or not password:
+        if (
+            not username
+            or not email
+            or not password
+        ):
 
             return render_template(
                 "signup.html",
                 error="Please fill all fields."
             )
+
 
         if password != confirm_password:
 
@@ -317,6 +453,7 @@ def signup():
                 error="Passwords do not match."
             )
 
+
         if len(password) < 6:
 
             return render_template(
@@ -324,25 +461,35 @@ def signup():
                 error="Password must contain at least 6 characters."
             )
 
+
         connection = get_db()
         cursor = connection.cursor()
 
+
         cursor.execute(
-            "SELECT * FROM users WHERE email = %s",
+            """
+            SELECT *
+            FROM users
+            WHERE email = %s
+            """,
             (email,)
         )
 
+
         existing_user = cursor.fetchone()
+
 
         if existing_user:
 
             cursor.close()
             connection.close()
 
+
             return render_template(
                 "signup.html",
                 error="An account with this email already exists."
             )
+
 
         # -------------------------------------------------
         # CREATE USER
@@ -352,10 +499,16 @@ def signup():
             password
         )
 
+
         cursor.execute(
             """
             INSERT INTO users
-            (username, email, password, verified)
+            (
+                username,
+                email,
+                password,
+                verified
+            )
             VALUES (%s, %s, %s, 0)
             RETURNING id
             """,
@@ -366,12 +519,16 @@ def signup():
             )
         )
 
+
         user_id = cursor.fetchone()["id"]
+
 
         connection.commit()
 
+
         cursor.close()
         connection.close()
+
 
         # -------------------------------------------------
         # CREATE OTP
@@ -379,32 +536,59 @@ def signup():
 
         otp = generate_otp()
 
-        session["verification_user_id"] = user_id
-        session["verification_email"] = email
-        session["verification_otp"] = otp
+
+        session[
+            "verification_user_id"
+        ] = user_id
+
+
+        session[
+            "verification_email"
+        ] = email
+
+
+        session[
+            "verification_otp"
+        ] = otp
+
 
         send_otp_email(
             email,
             otp
         )
 
+
         return redirect(
-            url_for("verify_signup")
+            url_for(
+                "verify_signup"
+            )
         )
 
-    return render_template("signup.html")
+
+    return render_template(
+        "signup.html"
+    )
 
 
 # =========================================================
 # SIGNUP OTP VERIFICATION
 # =========================================================
 
-@app.route("/verify-signup", methods=["GET", "POST"])
+@app.route(
+    "/verify-signup",
+    methods=["GET", "POST"]
+)
 def verify_signup():
 
-    if "verification_user_id" not in session:
+    if (
+        "verification_user_id"
+        not in session
+    ):
 
-        return redirect(url_for("signup"))
+        return redirect(
+            url_for("signup")
+        )
+
 
     if request.method == "POST":
 
@@ -413,9 +597,11 @@ def verify_signup():
             ""
         ).strip()
 
+
         saved_otp = session.get(
             "verification_otp"
         )
+
 
         if entered_otp != saved_otp:
 
@@ -424,10 +610,15 @@ def verify_signup():
                 error="Invalid verification code."
             )
 
-        user_id = session["verification_user_id"]
+
+        user_id = session[
+            "verification_user_id"
+        ]
+
 
         connection = get_db()
         cursor = connection.cursor()
+
 
         cursor.execute(
             """
@@ -438,29 +629,36 @@ def verify_signup():
             (user_id,)
         )
 
+
         connection.commit()
+
 
         cursor.close()
         connection.close()
+
 
         session.pop(
             "verification_user_id",
             None
         )
 
+
         session.pop(
             "verification_email",
             None
         )
+
 
         session.pop(
             "verification_otp",
             None
         )
 
+
         return redirect(
             url_for("login")
         )
+
 
     return render_template(
         "verify.html"
@@ -471,12 +669,21 @@ def verify_signup():
 # LOGIN OTP VERIFICATION
 # =========================================================
 
-@app.route("/verify-login", methods=["GET", "POST"])
+@app.route(
+    "/verify-login",
+    methods=["GET", "POST"]
+)
 def verify_login():
 
-    if "login_user_id" not in session:
+    if (
+        "login_user_id"
+        not in session
+    ):
 
-        return redirect(url_for("login"))
+        return redirect(
+            url_for("login")
+        )
+
 
     if request.method == "POST":
 
@@ -485,9 +692,11 @@ def verify_login():
             ""
         ).strip()
 
+
         saved_otp = session.get(
             "login_otp"
         )
+
 
         if entered_otp != saved_otp:
 
@@ -496,28 +705,39 @@ def verify_login():
                 error="Invalid verification code."
             )
 
-        user_id = session["login_user_id"]
 
-        session["user_id"] = user_id
+        user_id = session[
+            "login_user_id"
+        ]
+
+
+        session[
+            "user_id"
+        ] = user_id
+
 
         session.pop(
             "login_user_id",
             None
         )
 
+
         session.pop(
             "login_email",
             None
         )
+
 
         session.pop(
             "login_otp",
             None
         )
 
+
         return redirect(
             url_for("home")
         )
+
 
     return render_template(
         "verify.html"
@@ -537,34 +757,49 @@ def home():
             url_for("login")
         )
 
-    user_id = session["user_id"]
+
+    user_id = session[
+        "user_id"
+    ]
+
 
     connection = get_db()
     cursor = connection.cursor()
 
+
     cursor.execute(
-        "SELECT * FROM users WHERE id = %s",
+        """
+        SELECT *
+        FROM users
+        WHERE id = %s
+        """,
         (user_id,)
     )
 
+
     user = cursor.fetchone()
+
 
     cursor.close()
     connection.close()
+
 
     if not user:
 
         session.clear()
 
+
         return redirect(
             url_for("login")
         )
+
 
     # -----------------------------------------------------
     # USER-SPECIFIC S3 FOLDER
     # -----------------------------------------------------
 
     prefix = f"users/{user_id}/"
+
 
     try:
 
@@ -573,24 +808,36 @@ def home():
             Prefix=prefix
         )
 
+
         files = response.get(
             "Contents",
             []
         )
 
-        # Remove folder path from displayed filename
+
+        # -------------------------------------------------
+        # REMOVE FOLDER PATH FROM DISPLAYED FILE NAME
+        # -------------------------------------------------
+
         for file in files:
 
-            file["DisplayName"] = file["Key"].replace(
+            file["DisplayName"] = file[
+                "Key"
+            ].replace(
                 prefix,
                 "",
                 1
             )
 
+
         total_size = sum(
-            file.get("Size", 0)
+            file.get(
+                "Size",
+                0
+            )
             for file in files
         )
+
 
         return render_template(
             "dashboard.html",
@@ -599,6 +846,7 @@ def home():
             username=user["username"],
             email=user["email"]
         )
+
 
     except Exception as e:
 
@@ -613,7 +861,10 @@ def home():
 # UPLOAD
 # =========================================================
 
-@app.route("/upload", methods=["POST"])
+@app.route(
+    "/upload",
+    methods=["POST"]
+)
 def upload_file():
 
     if "user_id" not in session:
@@ -622,19 +873,28 @@ def upload_file():
             url_for("login")
         )
 
+
     file = request.files.get(
         "file"
     )
 
+
     if file and file.filename:
 
-        user_id = session["user_id"]
+        user_id = session[
+            "user_id"
+        ]
+
 
         filename = os.path.basename(
             file.filename
         )
 
-        s3_key = f"users/{user_id}/{filename}"
+
+        s3_key = (
+            f"users/{user_id}/{filename}"
+        )
+
 
         try:
 
@@ -644,12 +904,14 @@ def upload_file():
                 s3_key
             )
 
+
         except Exception as e:
 
             return f"""
             <h2>Upload failed</h2>
             <p>{e}</p>
             """
+
 
     return redirect(
         url_for("home")
@@ -660,7 +922,9 @@ def upload_file():
 # DOWNLOAD
 # =========================================================
 
-@app.route("/download/<path:filename>")
+@app.route(
+    "/download/<path:filename>"
+)
 def download_file(filename):
 
     if "user_id" not in session:
@@ -669,13 +933,21 @@ def download_file(filename):
             url_for("login")
         )
 
-    user_id = session["user_id"]
+
+    user_id = session[
+        "user_id"
+    ]
+
 
     filename = os.path.basename(
         filename
     )
 
-    s3_key = f"users/{user_id}/{filename}"
+
+    s3_key = (
+        f"users/{user_id}/{filename}"
+    )
+
 
     try:
 
@@ -684,13 +956,20 @@ def download_file(filename):
             Key=s3_key
         )
 
+
         return send_file(
+
             io.BytesIO(
-                file_object["Body"].read()
+                file_object[
+                    "Body"
+                ].read()
             ),
+
             download_name=filename,
+
             as_attachment=True
         )
+
 
     except Exception as e:
 
@@ -704,7 +983,9 @@ def download_file(filename):
 # DELETE
 # =========================================================
 
-@app.route("/delete/<path:filename>")
+@app.route(
+    "/delete/<path:filename>"
+)
 def delete_file(filename):
 
     if "user_id" not in session:
@@ -713,13 +994,21 @@ def delete_file(filename):
             url_for("login")
         )
 
-    user_id = session["user_id"]
+
+    user_id = session[
+        "user_id"
+    ]
+
 
     filename = os.path.basename(
         filename
     )
 
-    s3_key = f"users/{user_id}/{filename}"
+
+    s3_key = (
+        f"users/{user_id}/{filename}"
+    )
+
 
     try:
 
@@ -728,12 +1017,14 @@ def delete_file(filename):
             Key=s3_key
         )
 
+
     except Exception as e:
 
         return f"""
         <h2>Delete failed</h2>
         <p>{e}</p>
         """
+
 
     return redirect(
         url_for("home")
@@ -748,6 +1039,7 @@ def delete_file(filename):
 def logout():
 
     session.clear()
+
 
     return redirect(
         url_for("login")
