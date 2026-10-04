@@ -11,10 +11,11 @@ from flask import (
 import boto3
 import os
 import io
-import sqlite3
 import random
 import smtplib
+import psycopg2
 
+from psycopg2.extras import RealDictCursor
 from email.message import EmailMessage
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -48,7 +49,6 @@ AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("AWS_BUCKET_NAME")
 
-
 s3 = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -68,25 +68,27 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 
 
 # =========================================================
-# DATABASE
+# POSTGRESQL DATABASE
 # =========================================================
 
-DATABASE = "users.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def get_db():
-    connection = sqlite3.connect(DATABASE)
-    connection.row_factory = sqlite3.Row
-    return connection
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=RealDictCursor
+    )
 
 
 def create_database():
 
     connection = get_db()
+    cursor = connection.cursor()
 
-    connection.execute("""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
@@ -95,6 +97,7 @@ def create_database():
     """)
 
     connection.commit()
+    cursor.close()
     connection.close()
 
 
@@ -113,8 +116,10 @@ def generate_otp():
 def send_otp_email(receiver_email, otp):
 
     if not SMTP_EMAIL or not SMTP_PASSWORD:
+
         print("WARNING: SMTP_EMAIL or SMTP_PASSWORD is missing.")
         print("OTP for", receiver_email, "is:", otp)
+
         return False
 
     message = EmailMessage()
@@ -141,7 +146,10 @@ CloudStorage
 
     try:
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(
+            SMTP_HOST,
+            SMTP_PORT
+        ) as server:
 
             server.starttls()
 
@@ -174,16 +182,27 @@ def login():
 
     if request.method == "POST":
 
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
+        email = request.form.get(
+            "email",
+            ""
+        ).strip().lower()
+
+        password = request.form.get(
+            "password",
+            ""
+        )
 
         connection = get_db()
+        cursor = connection.cursor()
 
-        user = connection.execute(
-            "SELECT * FROM users WHERE email = ?",
+        cursor.execute(
+            "SELECT * FROM users WHERE email = %s",
             (email,)
-        ).fetchone()
+        )
 
+        user = cursor.fetchone()
+
+        cursor.close()
         connection.close()
 
         if not user:
@@ -305,14 +324,18 @@ def signup():
             )
 
         connection = get_db()
+        cursor = connection.cursor()
 
-        existing_user = connection.execute(
-            "SELECT * FROM users WHERE email = ?",
+        cursor.execute(
+            "SELECT * FROM users WHERE email = %s",
             (email,)
-        ).fetchone()
+        )
+
+        existing_user = cursor.fetchone()
 
         if existing_user:
 
+            cursor.close()
             connection.close()
 
             return render_template(
@@ -328,11 +351,12 @@ def signup():
             password
         )
 
-        cursor = connection.execute(
+        cursor.execute(
             """
             INSERT INTO users
             (username, email, password, verified)
-            VALUES (?, ?, ?, 0)
+            VALUES (%s, %s, %s, 0)
+            RETURNING id
             """,
             (
                 username,
@@ -341,10 +365,11 @@ def signup():
             )
         )
 
+        user_id = cursor.fetchone()["id"]
+
         connection.commit()
 
-        user_id = cursor.lastrowid
-
+        cursor.close()
         connection.close()
 
         # -------------------------------------------------
@@ -401,17 +426,20 @@ def verify_signup():
         user_id = session["verification_user_id"]
 
         connection = get_db()
+        cursor = connection.cursor()
 
-        connection.execute(
+        cursor.execute(
             """
             UPDATE users
             SET verified = 1
-            WHERE id = ?
+            WHERE id = %s
             """,
             (user_id,)
         )
 
         connection.commit()
+
+        cursor.close()
         connection.close()
 
         session.pop(
@@ -511,12 +539,16 @@ def home():
     user_id = session["user_id"]
 
     connection = get_db()
+    cursor = connection.cursor()
 
-    user = connection.execute(
-        "SELECT * FROM users WHERE id = ?",
+    cursor.execute(
+        "SELECT * FROM users WHERE id = %s",
         (user_id,)
-    ).fetchone()
+    )
 
+    user = cursor.fetchone()
+
+    cursor.close()
     connection.close()
 
     if not user:
